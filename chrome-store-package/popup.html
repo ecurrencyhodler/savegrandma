@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaveGrandma</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <!-- Header with App Name and Logo -->
+        <div class="header">
+            <div class="app-info">
+                <h1 class="app-name">SaveGrandma</h1>
+            </div>
+            <p class="app-tagline">Protecting you from phishing emails</p>
+        </div>
+
+        <!-- Statistics Section -->
+        <div class="stats-section">
+            <h2 class="section-title">Protection Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📧</div>
+                    <div class="stat-content">
+                        <div class="stat-number" id="totalEmailsScanned">0</div>
+                        <div class="stat-label">Emails Scanned</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🚨</div>
+                    <div class="stat-content">
+                        <div class="stat-number" id="threatsIdentified">0</div>
+                        <div class="stat-label">Threats Identified</div>
+                    </div>
+                </div>
+                <div class="stat-card clickable-stat-card" id="whitelistStatCard">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-content">
+                        <div class="stat-number" id="emailsWhitelisted">0</div>
+                        <div class="stat-label">Emails Whitelisted</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- URL Section -->
+        <div class="url-section">
+            <h3 class="url-title">Current Site:</h3>
+            <div class="url-display" id="currentUrl">Loading...</div>
+        </div>
+
+        <!-- Help Link -->
+        <div class="help-section">
+            <a href="https://docs.google.com/forms/d/e/1FAIpQLSeJkoB_yeSJs5TsJuwk9NvTAVTIX9GlkX74qbYCSbmWTUBlBA/viewform?usp=sharing&ouid=111529813182216400042" target="_blank" class="help-link">Help</a>
+        </div>
+
+    </div>
+
+    <!-- Whitelist Management Popup (Hidden by default) -->
+    <div id="whitelistPopup" class="whitelist-popup-overlay" style="display: none;">
+        <div class="whitelist-popup">
+            <div class="whitelist-popup-header">
+                <h2 class="whitelist-popup-title">Whitelist Management</h2>
+                <button id="closeWhitelistPopup" class="close-popup-btn">×</button>
+            </div>
+            
+            <div class="whitelist-popup-content">
+                <!-- Whitelist Status in Popup -->
+                <div class="whitelist-popup-status">
+                    <div class="status-info">
+                        <span id="popupWhitelistCount">0</span> / <span id="popupWhitelistMax">10,000</span> emails
+                    </div>
+                    <div id="popupWhitelistStatusMessage" class="status-message">✓ Space available</div>
+                </div>
+                
+                <!-- Clear All Button -->
+                <div class="whitelist-actions">
+                    <button id="popupClearAllBtn" class="clear-all-btn" title="Clear all whitelisted emails">Clear All</button>
+                </div>
+                
+                <!-- Whitelist Items -->
+                <div class="whitelist-popup-container">
+                    <div id="popupWhitelistEmpty" class="empty-state">
+                        <p>No emails whitelisted yet</p>
+                        <small>Emails you mark as safe will appear here</small>
+                    </div>
+                    <div id="popupWhitelistItems" class="whitelist-items"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
