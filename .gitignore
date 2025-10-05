@@ -49,6 +49,8 @@ temp/
 
 # Markdown files
 *.md
+!README.md
+!BUILD_MANIFEST.md
 
 # Zip files
 *.zip

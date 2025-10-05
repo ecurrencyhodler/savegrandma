@@ -8,7 +8,11 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, '.'),
     filename: 'savegrandma.bundle.js',
-    clean: false
+    clean: false,
+    // Ensure deterministic builds
+    hashFunction: 'sha256',
+    hashDigest: 'hex',
+    hashDigestLength: 8
   },
   devtool: false, // Disable source maps to avoid eval() usage
   module: {

@@ -5,6 +5,8 @@
   "main": "inboxsdk.js",
   "scripts": {
     "build": "webpack",
+    "verify": "node verify-build.js",
+    "build-and-verify": "npm run build && npm run verify",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
