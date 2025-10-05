@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SaveGrandma - Email Security",
-  "version": "1.0.0",
-  "description": "Protect yourself from phishing emails with AI-powered detection. Analyzes Gmail emails to identify threats.",
+  "version": "1.1.0",
+  "description": "Protect yourself from phishing emails. Built with your privacy in mind.",
   "permissions": [
     "storage",
     "activeTab"

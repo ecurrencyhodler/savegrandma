@@ -57,7 +57,7 @@ body {
 .url-section {
     background: #f8f9fa;
     border-top: 1px solid #e9ecef;
-    padding: 16px 20px 20px 20px;
+    padding: 16px 20px 48px 20px;
     margin-top: 8px;
 }
 
@@ -187,6 +187,16 @@ body {
     margin-top: 4px;
 }
 
+.stat-subtext {
+    font-size: 10px;
+    color: #888;
+    font-weight: 400;
+    margin-top: 2px;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
 
 /* Help Section */
 .help-section {
@@ -194,6 +204,8 @@ body {
     bottom: 12px;
     right: 12px;
     z-index: 10;
+    display: flex;
+    gap: 8px;
 }
 
 .help-link {
@@ -208,6 +220,13 @@ body {
 .help-link:hover {
     opacity: 1;
     text-decoration: underline;
+}
+
+.help-separator {
+    color: #6c757d;
+    font-size: 10px;
+    font-weight: 400;
+    opacity: 0.7;
 }
 
 .btn-icon {

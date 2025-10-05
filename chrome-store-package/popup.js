@@ -25,77 +25,173 @@ class SaveGrandmaPopup {
         }
     }
 
+    // Extract Gmail account ID from URL (e.g., u/0, u/1, etc.)
+    getGmailAccountId(url) {
+        if (!url) return 'default';
+        
+        // More robust regex that handles various Gmail URL patterns including query params and fragments
+        const patterns = [
+            /mail\.google\.com\/mail\/u\/(\d+)(?:\/|#|\?|$)/,  // Standard pattern with query params
+            /inbox\.google\.com\/u\/(\d+)(?:\/|#|\?|$)/,      // Inbox pattern
+            /mail\.google\.com\/u\/(\d+)(?:\/|#|\?|$)/        // Alternative pattern
+        ];
+        
+        for (const pattern of patterns) {
+            const match = url.match(pattern);
+            if (match) {
+                return `u_${match[1]}`;
+            }
+        }
+        
+        return 'default';
+    }
+
     async loadData() {
-        // Load statistics from storage
-        const statsData = await this.getStorageData('savegrandma_stats');
-        if (statsData) {
-            this.stats = { ...this.stats, ...statsData };
+        // First check if we're on a Gmail URL
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const isOnGmail = tabs[0] && (tabs[0].url.includes('mail.google.com') || tabs[0].url.includes('inbox.google.com'));
+        
+        if (!isOnGmail) {
+            // Not on Gmail, reset stats to default values
+            this.stats = {
+                totalEmailsScanned: 0,
+                threatsIdentified: 0,
+                emailsWhitelisted: 0
+            };
+            this.whitelist = new Set();
+            return;
         }
 
-        // Load whitelist from storage
-        const whitelistData = await this.getStorageData('savegrandma_whitelist');
+        // Get account-specific storage keys
+        const accountId = this.getGmailAccountId(tabs[0].url);
+        const statsKey = `savegrandma_stats_${accountId}`;
+        const whitelistKey = `savegrandma_whitelist_${accountId}`;
+        
+        console.log('Loading data for account:', accountId, 'URL:', tabs[0].url);
+        console.log('Storage keys:', { statsKey, whitelistKey });
+
+        // Load statistics from storage only when on Gmail (account-specific)
+        const statsData = await this.getStorageData(statsKey);
+        console.log('Loaded stats data from storage:', statsData);
+        if (statsData) {
+            // Handle new session/persistent structure
+            if (statsData.sessionStats) {
+                // New format: separate session and persistent stats
+                this.stats.totalEmailsScanned = statsData.sessionStats.emailsScannedThisSession || 0;
+                this.stats.threatsIdentified = statsData.sessionStats.threatsIdentifiedThisSession || 0;
+                this.stats.totalThreatsEverFound = statsData.totalThreatsEverFound || 0;
+                this.stats.emailsWhitelisted = statsData.emailsWhitelisted || 0;
+            } else {
+                // Legacy format: migrate to new structure
+                this.stats = { ...this.stats, ...statsData };
+                this.stats.totalThreatsEverFound = statsData.threatsIdentified || 0;
+                console.log('Migrated legacy stats format in popup');
+            }
+            console.log('Updated stats from storage:', this.stats);
+        }
+
+        // Load whitelist from storage only when on Gmail (account-specific)
+        const whitelistData = await this.getStorageData(whitelistKey);
         if (whitelistData) {
             this.whitelist = new Set(whitelistData);
-            this.stats.emailsWhitelisted = this.whitelist.size;
+            // Don't overwrite loaded stats, just ensure consistency
+            if (!this.stats.emailsWhitelisted) {
+                this.stats.emailsWhitelisted = this.whitelist.size;
+            }
         }
 
         // Try to get current stats from the content script if available
         try {
-            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs[0] && tabs[0].url.includes('mail.google.com')) {
-                // Request current stats from the content script
-                const response = await chrome.tabs.sendMessage(tabs[0].id, { 
+                console.log('Attempting to get stats from content script for tab:', tabs[0].id);
+                // Request current stats from the content script with timeout
+                const response = await this.sendMessageWithTimeout(tabs[0].id, { 
                     action: 'getStats' 
-                });
+                }, 2000); // 2 second timeout
+                
+                console.log('Content script response:', response);
                 
                 if (response && response.success && response.stats) {
+                    console.log('Updating stats from content script:', response.stats);
+                    // Content script provides legacy format, so we use it directly
                     this.stats = { ...this.stats, ...response.stats };
                 } else if (response && response.stats) {
                     // Handle legacy response format
+                    console.log('Updating stats from content script (legacy format):', response.stats);
                     this.stats = { ...this.stats, ...response.stats };
+                } else {
+                    console.log('No valid stats in content script response');
                 }
             }
         } catch (error) {
             // Content script might not be available, use stored data
-            console.log('Content script not available, using stored data');
+            console.log('Content script not available, using stored data:', error.message);
         }
     }
 
     async getStorageData(key) {
-        return new Promise((resolve) => {
-            // Try chrome.storage.local first, fallback to localStorage
-            if (chrome.storage && chrome.storage.local) {
-                chrome.storage.local.get([key], (result) => {
-                    resolve(result[key] || null);
+        // Get data from chrome.storage.local
+        if (chrome.storage && chrome.storage.local) {
+            try {
+                const result = await new Promise((resolve, reject) => {
+                    chrome.storage.local.get([key], (result) => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                        } else {
+                            resolve(result);
+                        }
+                    });
                 });
-            } else {
-                // Fallback to localStorage for compatibility
-                try {
-                    const stored = localStorage.getItem(key);
-                    resolve(stored ? JSON.parse(stored) : null);
-                } catch (error) {
-                    console.error('Error reading from localStorage:', error);
-                    resolve(null);
-                }
+                return result[key] || null;
+            } catch (storageError) {
+                console.error('Chrome storage error:', storageError);
+                return null;
             }
-        });
+        } else {
+            console.error('Chrome storage not available');
+            return null;
+        }
     }
 
+
     async setStorageData(key, value) {
-        return new Promise((resolve) => {
-            // Try chrome.storage.local first, fallback to localStorage
-            if (chrome.storage && chrome.storage.local) {
-                chrome.storage.local.set({ [key]: value }, resolve);
-            } else {
-                // Fallback to localStorage for compatibility
-                try {
-                    localStorage.setItem(key, JSON.stringify(value));
-                    resolve();
-                } catch (error) {
-                    console.error('Error writing to localStorage:', error);
-                    resolve();
-                }
+        // Save data to chrome.storage.local
+        if (chrome.storage && chrome.storage.local) {
+            try {
+                await new Promise((resolve, reject) => {
+                    chrome.storage.local.set({ [key]: value }, () => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+            } catch (storageError) {
+                console.error('Chrome storage error:', storageError);
+                throw storageError;
             }
+        } else {
+            console.error('Chrome storage not available');
+            throw new Error('Chrome storage not available');
+        }
+    }
+
+
+    async sendMessageWithTimeout(tabId, message, timeout = 2000) {
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error('Message timeout'));
+            }, timeout);
+
+            chrome.tabs.sendMessage(tabId, message, (response) => {
+                clearTimeout(timeoutId);
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(response);
+                }
+            });
         });
     }
 
@@ -130,7 +226,9 @@ class SaveGrandmaPopup {
 
         // Listen for messages from content script
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            console.log('Popup received message:', message);
             if (message.action === 'updateStats') {
+                console.log('Updating stats from content script:', message.stats);
                 this.updateStatsFromContent(message.stats);
             }
         });
@@ -138,7 +236,9 @@ class SaveGrandmaPopup {
 
     updateStatsFromContent(newStats) {
         if (newStats) {
+            console.log('Before update - stats:', this.stats);
             this.stats = { ...this.stats, ...newStats };
+            console.log('After update - stats:', this.stats);
             this.updateUI();
             this.saveStats();
         }
@@ -167,37 +267,64 @@ class SaveGrandmaPopup {
                     currentUrlElement.textContent = currentUrl;
                     currentUrlElement.className = 'url-display gmail-url';
                 } else {
-                    currentUrlElement.textContent = 'Go to the Chrome tab with your email.';
+                    currentUrlElement.textContent = 'Go to your email to activate scanning.';
                     currentUrlElement.className = 'url-display non-gmail';
+                    
+                    // Reset stats when not on Gmail
+                    this.stats = {
+                        totalEmailsScanned: 0,
+                        threatsIdentified: 0,
+                        emailsWhitelisted: 0
+                    };
+                    this.whitelist = new Set();
+                    this.updateUI();
                 }
             } else {
-                currentUrlElement.textContent = 'Go to the Chrome tab with your email.';
+                currentUrlElement.textContent = 'Go to your email to activate scanning.';
                 currentUrlElement.className = 'url-display non-gmail';
+                
+                // Reset stats when no URL available
+                this.stats = {
+                    totalEmailsScanned: 0,
+                    threatsIdentified: 0,
+                    emailsWhitelisted: 0
+                };
+                this.whitelist = new Set();
+                this.updateUI();
             }
         } catch (error) {
             console.error('Failed to update current URL:', error);
             const currentUrlElement = document.getElementById('currentUrl');
             if (currentUrlElement) {
-                currentUrlElement.textContent = 'Go to the Chrome tab with your email.';
+                currentUrlElement.textContent = 'Go to your email to activate scanning.';
                 currentUrlElement.className = 'url-display non-gmail';
+                
+                // Reset stats on error
+                this.stats = {
+                    totalEmailsScanned: 0,
+                    threatsIdentified: 0,
+                    emailsWhitelisted: 0
+                };
+                this.whitelist = new Set();
+                this.updateUI();
             }
         }
     }
 
     updateStatistics() {
-        // Update total emails scanned
+        // Update total emails scanned (session)
         const totalEmailsElement = document.getElementById('totalEmailsScanned');
         if (totalEmailsElement) {
             totalEmailsElement.textContent = this.stats.totalEmailsScanned.toLocaleString();
         }
 
-        // Update threats identified
+        // Update threats identified (session)
         const threatsElement = document.getElementById('threatsIdentified');
         if (threatsElement) {
             threatsElement.textContent = this.stats.threatsIdentified.toLocaleString();
         }
 
-        // Update emails whitelisted
+        // Update emails whitelisted (persistent)
         const whitelistedElement = document.getElementById('emailsWhitelisted');
         if (whitelistedElement) {
             whitelistedElement.textContent = this.stats.emailsWhitelisted.toLocaleString();
@@ -206,10 +333,13 @@ class SaveGrandmaPopup {
 
     updateWhitelistDisplay() {
         // Update whitelist popup if it's open
-        // Only update if the popup is actually visible
         const whitelistPopup = document.getElementById('whitelistPopup');
-        if (whitelistPopup && whitelistPopup.style.display && whitelistPopup.style.display !== 'none') {
-            this.updateWhitelistPopup();
+        if (whitelistPopup) {
+            // Use computed style to check if popup is actually visible
+            const computedStyle = window.getComputedStyle(whitelistPopup);
+            if (computedStyle.display !== 'none') {
+                this.updateWhitelistPopup();
+            }
         }
     }
 
@@ -221,6 +351,8 @@ class SaveGrandmaPopup {
         const popupWhitelistCount = document.getElementById('popupWhitelistCount');
         const popupWhitelistMax = document.getElementById('popupWhitelistMax');
         const popupWhitelistStatusMessage = document.getElementById('popupWhitelistStatusMessage');
+
+        console.log('updateWhitelistPopup called - whitelist size:', this.whitelist.size);
 
         if (!popupWhitelistItems || !popupWhitelistEmpty) {
             console.log('Popup elements not found - cannot update');
@@ -253,17 +385,25 @@ class SaveGrandmaPopup {
 
         if (this.whitelist.size === 0) {
             // Show empty state
+            console.log('Setting empty state - showing empty message, hiding items');
             popupWhitelistEmpty.style.display = 'block';
             popupWhitelistItems.style.display = 'none';
-            if (popupClearAllBtn) {
+            
+            // Only disable clear button if it's not currently in a processing state
+            if (popupClearAllBtn && popupClearAllBtn.textContent !== 'Clearing...' && popupClearAllBtn.textContent !== 'Cleared!') {
                 popupClearAllBtn.disabled = true;
                 popupClearAllBtn.style.opacity = '0.5';
             }
+            
+            // Force a reflow to ensure the display changes are applied
+            popupWhitelistEmpty.offsetHeight;
         } else {
             // Show whitelist items
             popupWhitelistEmpty.style.display = 'none';
             popupWhitelistItems.style.display = 'block';
-            if (popupClearAllBtn) {
+            
+            // Only enable clear button if it's not currently in a processing state
+            if (popupClearAllBtn && popupClearAllBtn.textContent !== 'Clearing...' && popupClearAllBtn.textContent !== 'Cleared!') {
                 popupClearAllBtn.disabled = false;
                 popupClearAllBtn.style.opacity = '1';
             }
@@ -273,6 +413,9 @@ class SaveGrandmaPopup {
                 const item = this.createWhitelistItem(email);
                 popupWhitelistItems.appendChild(item);
             });
+            
+            // Force a reflow to ensure the display changes are applied
+            popupWhitelistItems.offsetHeight;
         }
     }
 
@@ -311,7 +454,14 @@ class SaveGrandmaPopup {
             
             // Save to storage in background
             try {
-                await this.setStorageData('savegrandma_whitelist', [...this.whitelist]);
+                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (!tabs || !tabs[0] || !tabs[0].url) {
+                    console.error('No active tab or URL found when saving whitelist');
+                    return;
+                }
+                const accountId = this.getGmailAccountId(tabs[0].url);
+                const whitelistKey = `savegrandma_whitelist_${accountId}`;
+                await this.setStorageData(whitelistKey, [...this.whitelist]);
                 await this.saveStats();
                 
                 // Notify content script
@@ -362,63 +512,155 @@ class SaveGrandmaPopup {
         if (!confirmed) return;
         
         const removedEmails = [...this.whitelist];
+        const clearButton = document.getElementById('popupClearAllBtn');
+        const originalButtonText = clearButton ? clearButton.textContent : 'Clear All';
+        
         console.log('Starting clear all whitelist operation, removing:', removedEmails.length, 'emails');
         
-        // OPTIMISTIC UPDATE: Immediately update UI for instant feedback
-        this.whitelist.clear();
-        this.stats.emailsWhitelisted = 0;
+        // Show loading state immediately
+        if (clearButton) {
+            clearButton.textContent = 'Clearing...';
+            clearButton.disabled = true;
+            clearButton.style.opacity = '0.7';
+        }
         
-        // Update UI immediately
-        this.updateStatistics();
-        this.updateWhitelistPopup();
-        
-        console.log('UI updated immediately, whitelist size is now:', this.whitelist.size);
-        
-        // Save to storage in background
         try {
-            await this.setStorageData('savegrandma_whitelist', []);
-            await this.saveStats();
-            console.log('Storage updated successfully');
+            // Get account info before clearing
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tabs || !tabs[0] || !tabs[0].url) {
+                throw new Error('No active tab or URL found when clearing whitelist');
+            }
             
-            // Notify content script
-            this.notifyContentScript('whitelistUpdated', { 
+            const accountId = this.getGmailAccountId(tabs[0].url);
+            const whitelistKey = `savegrandma_whitelist_${accountId}`;
+            
+            // Clear data and save to storage
+            this.whitelist.clear();
+            this.stats.emailsWhitelisted = 0;
+            
+            await this.setStorageData(whitelistKey, []);
+            await this.saveStats();
+            
+            // Notify content script and wait for response
+            await this.notifyContentScript('whitelistUpdated', { 
                 action: 'clear', 
                 emails: removedEmails 
             });
             
-        } catch (error) {
-            console.error('Failed to save whitelist to storage:', error);
+            console.log('Storage updated successfully');
             
-            // ROLLBACK: Reload data from storage to restore correct state
-            try {
-                await this.loadData();
-                this.updateUI();
-                console.log('Rolled back to previous state due to storage error');
+            // Wait a moment for the clearing process to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Refresh whitelist from storage to ensure we have the latest state
+            // But don't call loadData() as it might override our cleared stats with content script data
+            if (tabs && tabs[0] && tabs[0].url) {
+                const accountId = this.getGmailAccountId(tabs[0].url);
+                const whitelistKey = `savegrandma_whitelist_${accountId}`;
                 
-                // Show error message to user
-                alert('Failed to save changes. Please try again.');
-            } catch (rollbackError) {
-                console.error('Failed to rollback after storage error:', rollbackError);
-                alert('An error occurred. Please refresh the extension.');
+                // Reload whitelist from storage to confirm it's empty
+                const whitelistData = await this.getStorageData(whitelistKey);
+                if (whitelistData) {
+                    this.whitelist = new Set(whitelistData);
+                    this.stats.emailsWhitelisted = this.whitelist.size;
+                }
             }
+            
+            // Update UI only after successful save and data refresh
+            this.updateStatistics();
+            this.updateWhitelistPopup();
+            this.updateUI();
+            
+            console.log('UI updated - whitelist size:', this.whitelist.size, 'stats.emailsWhitelisted:', this.stats.emailsWhitelisted);
+            
+            // Show success state
+            if (clearButton) {
+                clearButton.textContent = 'Cleared!';
+                clearButton.style.backgroundColor = '#28a745';
+                
+                // Reset button after delay
+                setTimeout(() => {
+                    clearButton.textContent = originalButtonText;
+                    clearButton.disabled = false;
+                    clearButton.style.opacity = '1';
+                    clearButton.style.backgroundColor = '';
+                }, 2000);
+            }
+            
+        } catch (error) {
+            console.error('Failed to clear whitelist:', error);
+            
+            // Restore original data (no optimistic update to rollback)
+            this.whitelist = new Set(removedEmails);
+            this.stats.emailsWhitelisted = this.whitelist.size;
+            
+            // Restore button state
+            if (clearButton) {
+                clearButton.textContent = originalButtonText;
+                clearButton.disabled = false;
+                clearButton.style.opacity = '1';
+                clearButton.style.backgroundColor = '#dc3545';
+                
+                // Reset button color after delay
+                setTimeout(() => {
+                    clearButton.style.backgroundColor = '';
+                }, 3000);
+            }
+            
+            // Show error message to user
+            alert('Failed to clear whitelist. Please try again.');
+            console.log('Restored original state due to error');
         }
     }
 
     async saveStats() {
-        await this.setStorageData('savegrandma_stats', this.stats);
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tabs || !tabs[0] || !tabs[0].url) {
+                console.error('No active tab or URL found when saving stats');
+                return;
+            }
+            const accountId = this.getGmailAccountId(tabs[0].url);
+            const statsKey = `savegrandma_stats_${accountId}`;
+            await this.setStorageData(statsKey, this.stats);
+        } catch (error) {
+            console.error('Error saving stats:', error);
+        }
     }
 
-    async notifyContentScript(action, data) {
+    async notifyContentScript(action, data, retries = 3) {
         try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tabs[0] && tabs[0].url.includes('mail.google.com')) {
-                chrome.tabs.sendMessage(tabs[0].id, {
-                    action: action,
-                    data: data
-                });
+                for (let attempt = 1; attempt <= retries; attempt++) {
+                    try {
+                        const response = await new Promise((resolve, reject) => {
+                            chrome.tabs.sendMessage(tabs[0].id, {
+                                action: action,
+                                data: data
+                            }, (response) => {
+                                if (chrome.runtime.lastError) {
+                                    reject(new Error(chrome.runtime.lastError.message));
+                                } else {
+                                    resolve(response);
+                                }
+                            });
+                        });
+                        console.log(`Content script notification successful on attempt ${attempt}:`, response);
+                        return response; // Success, exit retry loop
+                    } catch (error) {
+                        console.log(`Content script notification attempt ${attempt} failed:`, error);
+                        if (attempt === retries) {
+                            throw error; // Final attempt failed
+                        }
+                        // Wait before retry (exponential backoff)
+                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100));
+                    }
+                }
             }
         } catch (error) {
-            console.log('Could not notify content script:', error);
+            console.log('Could not notify content script after all retries:', error);
+            throw error; // Re-throw to allow caller to handle
         }
     }
 
@@ -426,34 +668,68 @@ class SaveGrandmaPopup {
     async refreshData() {
         try {
             const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const isOnGmail = tabs[0] && (tabs[0].url.includes('mail.google.com') || tabs[0].url.includes('inbox.google.com'));
+            
+            if (!isOnGmail) {
+                // Not on Gmail, reset stats to default values
+                this.stats = {
+                    totalEmailsScanned: 0,
+                    threatsIdentified: 0,
+                    emailsWhitelisted: 0
+                };
+                this.whitelist = new Set();
+                this.updateUI();
+                return;
+            }
+            
+            // Get account-specific storage keys
+            const accountId = this.getGmailAccountId(tabs[0].url);
+            const statsKey = `savegrandma_stats_${accountId}`;
+            const whitelistKey = `savegrandma_whitelist_${accountId}`;
+            
             if (tabs[0] && tabs[0].url.includes('mail.google.com')) {
-                const response = await chrome.tabs.sendMessage(tabs[0].id, { 
-                    action: 'getAllData' 
-                });
-                
-                if (response && response.success) {
-                    if (response.stats) {
-                        this.stats = { ...this.stats, ...response.stats };
-                    }
-                    if (response.whitelist) {
-                        this.whitelist = new Set(response.whitelist);
-                        this.stats.emailsWhitelisted = this.whitelist.size;
-                    }
+                try {
+                    const response = await new Promise((resolve, reject) => {
+                        chrome.tabs.sendMessage(tabs[0].id, { 
+                            action: 'getAllData' 
+                        }, (response) => {
+                            if (chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message));
+                            } else {
+                                resolve(response);
+                            }
+                        });
+                    });
                     
-                    this.updateUI();
-                    await this.saveStats();
-                } else if (response) {
-                    // Handle legacy response format
-                    if (response.stats) {
-                        this.stats = { ...this.stats, ...response.stats };
+                    if (response && response.success) {
+                        if (response.stats) {
+                            // Content script provides legacy format stats
+                            this.stats = { ...this.stats, ...response.stats };
+                        }
+                        if (response.whitelist) {
+                            this.whitelist = new Set(response.whitelist);
+                            this.stats.emailsWhitelisted = this.whitelist.size;
+                        }
+                        
+                        this.updateUI();
+                        await this.saveStats();
+                    } else if (response) {
+                        // Handle legacy response format
+                        if (response.stats) {
+                            this.stats = { ...this.stats, ...response.stats };
+                        }
+                        if (response.whitelist) {
+                            this.whitelist = new Set(response.whitelist);
+                            this.stats.emailsWhitelisted = this.whitelist.size;
+                        }
+                        
+                        this.updateUI();
+                        await this.saveStats();
                     }
-                    if (response.whitelist) {
-                        this.whitelist = new Set(response.whitelist);
-                        this.stats.emailsWhitelisted = this.whitelist.size;
-                    }
-                    
-                    this.updateUI();
-                    await this.saveStats();
+                } catch (error) {
+                    console.log('Could not get data from content script:', error);
+                    // Fallback to stored data
+                    await this.loadData();
                 }
             }
         } catch (error) {
@@ -474,4 +750,3 @@ window.addEventListener('focus', async () => {
         await window.saveGrandmaPopup.updateCurrentUrl();
     }
 });
-
