@@ -1,12 +1,16 @@
-// SaveGrandma Popup JavaScript
+// SaveGrandma Popup Frontend
 // Handles popup functionality, statistics display, and whitelist management
+
+const { getGmailAccountId } = require('../../common/storage/index.js');
+const { storage, messaging, ChromeAPI } = require('../../common/chromeApi/index.js');
 
 class SaveGrandmaPopup {
     constructor() {
         this.stats = {
             totalEmailsScanned: 0,
             threatsIdentified: 0,
-            emailsWhitelisted: 0
+            emailsWhitelisted: 0,
+            totalThreatsEverFound: 0
         };
         
         this.whitelist = new Set();
@@ -25,27 +29,6 @@ class SaveGrandmaPopup {
         }
     }
 
-    // Extract Gmail account ID from URL (e.g., u/0, u/1, etc.)
-    getGmailAccountId(url) {
-        if (!url) return 'default';
-        
-        // More robust regex that handles various Gmail URL patterns including query params and fragments
-        const patterns = [
-            /mail\.google\.com\/mail\/u\/(\d+)(?:\/|#|\?|$)/,  // Standard pattern with query params
-            /inbox\.google\.com\/u\/(\d+)(?:\/|#|\?|$)/,      // Inbox pattern
-            /mail\.google\.com\/u\/(\d+)(?:\/|#|\?|$)/        // Alternative pattern
-        ];
-        
-        for (const pattern of patterns) {
-            const match = url.match(pattern);
-            if (match) {
-                return `u_${match[1]}`;
-            }
-        }
-        
-        return 'default';
-    }
-
     async loadData() {
         // First check if we're on a Gmail URL
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -56,14 +39,15 @@ class SaveGrandmaPopup {
             this.stats = {
                 totalEmailsScanned: 0,
                 threatsIdentified: 0,
-                emailsWhitelisted: 0
+                emailsWhitelisted: 0,
+                totalThreatsEverFound: 0
             };
             this.whitelist = new Set();
             return;
         }
 
         // Get account-specific storage keys
-        const accountId = this.getGmailAccountId(tabs[0].url);
+        const accountId = getGmailAccountId(tabs[0].url);
         const statsKey = `savegrandma_stats_${accountId}`;
         const whitelistKey = `savegrandma_whitelist_${accountId}`;
         
@@ -94,10 +78,9 @@ class SaveGrandmaPopup {
         const whitelistData = await this.getStorageData(whitelistKey);
         if (whitelistData) {
             this.whitelist = new Set(whitelistData);
-            // Don't overwrite loaded stats, just ensure consistency
-            if (!this.stats.emailsWhitelisted) {
-                this.stats.emailsWhitelisted = this.whitelist.size;
-            }
+            // Always sync the counter with the actual whitelist size to prevent mismatches
+            this.stats.emailsWhitelisted = this.whitelist.size;
+            console.log(`Synced whitelist counter: ${this.stats.emailsWhitelisted} (actual whitelist size: ${this.whitelist.size})`);
         }
 
         // Try to get current stats from the content script if available
@@ -130,69 +113,34 @@ class SaveGrandmaPopup {
     }
 
     async getStorageData(key) {
-        // Get data from chrome.storage.local
-        if (chrome.storage && chrome.storage.local) {
-            try {
-                const result = await new Promise((resolve, reject) => {
-                    chrome.storage.local.get([key], (result) => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else {
-                            resolve(result);
-                        }
-                    });
-                });
-                return result[key] || null;
-            } catch (storageError) {
-                console.error('Chrome storage error:', storageError);
-                return null;
-            }
-        } else {
-            console.error('Chrome storage not available');
+        try {
+            ChromeAPI.log('getStorageData', { key });
+            const result = await storage.get([key]);
+            return result[key] || null;
+        } catch (error) {
+            ChromeAPI.handleError(error, 'getStorageData', { key });
             return null;
         }
     }
 
-
     async setStorageData(key, value) {
-        // Save data to chrome.storage.local
-        if (chrome.storage && chrome.storage.local) {
-            try {
-                await new Promise((resolve, reject) => {
-                    chrome.storage.local.set({ [key]: value }, () => {
-                        if (chrome.runtime.lastError) {
-                            reject(new Error(chrome.runtime.lastError.message));
-                        } else {
-                            resolve();
-                        }
-                    });
-                });
-            } catch (storageError) {
-                console.error('Chrome storage error:', storageError);
-                throw storageError;
-            }
-        } else {
-            console.error('Chrome storage not available');
-            throw new Error('Chrome storage not available');
+        try {
+            ChromeAPI.log('setStorageData', { key, valueSize: JSON.stringify(value).length });
+            await storage.set({ [key]: value });
+        } catch (error) {
+            ChromeAPI.handleError(error, 'setStorageData', { key });
+            throw error;
         }
     }
 
-
     async sendMessageWithTimeout(tabId, message, timeout = 2000) {
-        return new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-                reject(new Error('Message timeout'));
-            }, timeout);
-
-            chrome.tabs.sendMessage(tabId, message, (response) => {
-                clearTimeout(timeoutId);
-                if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                } else {
-                    resolve(response);
-                }
-            });
-        });
+        try {
+            ChromeAPI.log('sendMessageWithTimeout', { tabId, message, timeout });
+            return await messaging.sendMessage(tabId, message, timeout);
+        } catch (error) {
+            ChromeAPI.handleError(error, 'sendMessageWithTimeout', { tabId, message });
+            throw error;
+        }
     }
 
     setupEventListeners() {
@@ -224,12 +172,15 @@ class SaveGrandmaPopup {
             });
         }
 
-        // Listen for messages from content script
-        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-            console.log('Popup received message:', message);
+        // Listen for messages from content script and service worker
+        messaging.setupMessageListener((message, sender, sendResponse) => {
+            console.log('Popup received message:', message, 'from sender:', sender);
             if (message.action === 'updateStats') {
                 console.log('Updating stats from content script:', message.stats);
                 this.updateStatsFromContent(message.stats);
+            } else if (message.action === 'whitelistUpdated') {
+                console.log('Whitelist updated from service worker:', message.data);
+                this.handleWhitelistUpdate(message.data);
             }
         });
     }
@@ -241,6 +192,33 @@ class SaveGrandmaPopup {
             console.log('After update - stats:', this.stats);
             this.updateUI();
             this.saveStats();
+        }
+    }
+
+    async handleWhitelistUpdate(whitelistData) {
+        try {
+            console.log('Handling whitelist update:', whitelistData);
+            console.log('Current whitelist size before update:', this.whitelist.size);
+            console.log('Current stats.emailsWhitelisted before update:', this.stats.emailsWhitelisted);
+            
+            if (whitelistData.action === 'add') {
+                // Add email to local whitelist
+                this.whitelist.add(whitelistData.email);
+                this.stats.emailsWhitelisted = this.whitelist.size;
+                
+                console.log('After adding email - whitelist size:', this.whitelist.size);
+                console.log('After adding email - stats.emailsWhitelisted:', this.stats.emailsWhitelisted);
+                
+                // Update UI immediately
+                this.updateUI();
+                
+                // Save to storage
+                await this.saveStats();
+                
+                console.log(`✅ Added ${whitelistData.email} to whitelist, total: ${this.whitelist.size}`);
+            }
+        } catch (error) {
+            console.error('Error handling whitelist update:', error);
         }
     }
 
@@ -274,7 +252,8 @@ class SaveGrandmaPopup {
                     this.stats = {
                         totalEmailsScanned: 0,
                         threatsIdentified: 0,
-                        emailsWhitelisted: 0
+                        emailsWhitelisted: 0,
+                        totalThreatsEverFound: 0
                     };
                     this.whitelist = new Set();
                     this.updateUI();
@@ -287,7 +266,8 @@ class SaveGrandmaPopup {
                 this.stats = {
                     totalEmailsScanned: 0,
                     threatsIdentified: 0,
-                    emailsWhitelisted: 0
+                    emailsWhitelisted: 0,
+                    totalThreatsEverFound: 0
                 };
                 this.whitelist = new Set();
                 this.updateUI();
@@ -303,7 +283,8 @@ class SaveGrandmaPopup {
                 this.stats = {
                     totalEmailsScanned: 0,
                     threatsIdentified: 0,
-                    emailsWhitelisted: 0
+                    emailsWhitelisted: 0,
+                    totalThreatsEverFound: 0
                 };
                 this.whitelist = new Set();
                 this.updateUI();
@@ -329,6 +310,12 @@ class SaveGrandmaPopup {
         if (whitelistedElement) {
             whitelistedElement.textContent = this.stats.emailsWhitelisted.toLocaleString();
         }
+
+        // Update total threats ever found (persistent)
+        const totalThreatsElement = document.getElementById('totalThreatsEverFound');
+        if (totalThreatsElement) {
+            totalThreatsElement.textContent = this.stats.totalThreatsEverFound.toLocaleString();
+        }
     }
 
     updateWhitelistDisplay() {
@@ -342,7 +329,6 @@ class SaveGrandmaPopup {
             }
         }
     }
-
 
     updateWhitelistPopup() {
         const popupWhitelistItems = document.getElementById('popupWhitelistItems');
@@ -459,7 +445,7 @@ class SaveGrandmaPopup {
                     console.error('No active tab or URL found when saving whitelist');
                     return;
                 }
-                const accountId = this.getGmailAccountId(tabs[0].url);
+                const accountId = getGmailAccountId(tabs[0].url);
                 const whitelistKey = `savegrandma_whitelist_${accountId}`;
                 await this.setStorageData(whitelistKey, [...this.whitelist]);
                 await this.saveStats();
@@ -531,21 +517,45 @@ class SaveGrandmaPopup {
                 throw new Error('No active tab or URL found when clearing whitelist');
             }
             
-            const accountId = this.getGmailAccountId(tabs[0].url);
+            console.log('Active tab URL:', tabs[0].url);
+            const accountId = getGmailAccountId(tabs[0].url);
             const whitelistKey = `savegrandma_whitelist_${accountId}`;
+            console.log('Account ID:', accountId, 'Whitelist key:', whitelistKey);
             
             // Clear data and save to storage
             this.whitelist.clear();
             this.stats.emailsWhitelisted = 0;
+            console.log('Cleared whitelist in memory, size:', this.whitelist.size);
             
-            await this.setStorageData(whitelistKey, []);
-            await this.saveStats();
+            // Save to storage with error handling
+            try {
+                await this.setStorageData(whitelistKey, []);
+                console.log('Whitelist cleared in storage successfully');
+            } catch (storageError) {
+                console.error('Failed to clear whitelist in storage:', storageError);
+                throw new Error(`Storage error: ${storageError.message}`);
+            }
             
-            // Notify content script and wait for response
-            await this.notifyContentScript('whitelistUpdated', { 
-                action: 'clear', 
-                emails: removedEmails 
-            });
+            // Save stats with error handling
+            try {
+                await this.saveStats();
+                console.log('Stats saved successfully');
+            } catch (statsError) {
+                console.error('Failed to save stats:', statsError);
+                // Don't throw here, stats save failure shouldn't prevent whitelist clearing
+            }
+            
+            // Notify content script with error handling
+            try {
+                await this.notifyContentScript('whitelistUpdated', { 
+                    action: 'clear', 
+                    emails: removedEmails 
+                });
+                console.log('Content script notified successfully');
+            } catch (notificationError) {
+                console.error('Failed to notify content script:', notificationError);
+                // Don't throw here, notification failure shouldn't prevent whitelist clearing
+            }
             
             console.log('Storage updated successfully');
             
@@ -555,7 +565,7 @@ class SaveGrandmaPopup {
             // Refresh whitelist from storage to ensure we have the latest state
             // But don't call loadData() as it might override our cleared stats with content script data
             if (tabs && tabs[0] && tabs[0].url) {
-                const accountId = this.getGmailAccountId(tabs[0].url);
+                const accountId = getGmailAccountId(tabs[0].url);
                 const whitelistKey = `savegrandma_whitelist_${accountId}`;
                 
                 // Reload whitelist from storage to confirm it's empty
@@ -589,6 +599,12 @@ class SaveGrandmaPopup {
             
         } catch (error) {
             console.error('Failed to clear whitelist:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                whitelistSize: this.whitelist.size,
+                removedEmailsCount: removedEmails.length
+            });
             
             // Restore original data (no optimistic update to rollback)
             this.whitelist = new Set(removedEmails);
@@ -596,15 +612,16 @@ class SaveGrandmaPopup {
             
             // Restore button state
             if (clearButton) {
-                clearButton.textContent = originalButtonText;
+                clearButton.textContent = `Error: ${error.message}`;
                 clearButton.disabled = false;
                 clearButton.style.opacity = '1';
                 clearButton.style.backgroundColor = '#dc3545';
                 
-                // Reset button color after delay
+                // Reset button after delay
                 setTimeout(() => {
+                    clearButton.textContent = originalButtonText;
                     clearButton.style.backgroundColor = '';
-                }, 3000);
+                }, 5000);
             }
             
             // Show error message to user
@@ -620,7 +637,7 @@ class SaveGrandmaPopup {
                 console.error('No active tab or URL found when saving stats');
                 return;
             }
-            const accountId = this.getGmailAccountId(tabs[0].url);
+            const accountId = getGmailAccountId(tabs[0].url);
             const statsKey = `savegrandma_stats_${accountId}`;
             await this.setStorageData(statsKey, this.stats);
         } catch (error) {
@@ -634,17 +651,9 @@ class SaveGrandmaPopup {
             if (tabs[0] && tabs[0].url.includes('mail.google.com')) {
                 for (let attempt = 1; attempt <= retries; attempt++) {
                     try {
-                        const response = await new Promise((resolve, reject) => {
-                            chrome.tabs.sendMessage(tabs[0].id, {
-                                action: action,
-                                data: data
-                            }, (response) => {
-                                if (chrome.runtime.lastError) {
-                                    reject(new Error(chrome.runtime.lastError.message));
-                                } else {
-                                    resolve(response);
-                                }
-                            });
+                        const response = await messaging.sendMessage(tabs[0].id, {
+                            action: action,
+                            data: data
                         });
                         console.log(`Content script notification successful on attempt ${attempt}:`, response);
                         return response; // Success, exit retry loop
@@ -675,7 +684,8 @@ class SaveGrandmaPopup {
                 this.stats = {
                     totalEmailsScanned: 0,
                     threatsIdentified: 0,
-                    emailsWhitelisted: 0
+                    emailsWhitelisted: 0,
+                    totalThreatsEverFound: 0
                 };
                 this.whitelist = new Set();
                 this.updateUI();
@@ -683,22 +693,14 @@ class SaveGrandmaPopup {
             }
             
             // Get account-specific storage keys
-            const accountId = this.getGmailAccountId(tabs[0].url);
+            const accountId = getGmailAccountId(tabs[0].url);
             const statsKey = `savegrandma_stats_${accountId}`;
             const whitelistKey = `savegrandma_whitelist_${accountId}`;
             
             if (tabs[0] && tabs[0].url.includes('mail.google.com')) {
                 try {
-                    const response = await new Promise((resolve, reject) => {
-                        chrome.tabs.sendMessage(tabs[0].id, { 
-                            action: 'getAllData' 
-                        }, (response) => {
-                            if (chrome.runtime.lastError) {
-                                reject(new Error(chrome.runtime.lastError.message));
-                            } else {
-                                resolve(response);
-                            }
-                        });
+                    const response = await messaging.sendMessage(tabs[0].id, { 
+                        action: 'getAllData' 
                     });
                     
                     if (response && response.success) {

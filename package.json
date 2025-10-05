@@ -2,12 +2,13 @@
   "name": "savegrandma",
   "version": "1.0.0",
   "description": "A Chrome extension that detects phishing attempts in Gmail emails using DOM analysis and Compromise.js.",
-  "main": "inboxsdk.js",
+  "main": "src/contentScripts/gmail/index.js",
   "scripts": {
     "build": "webpack",
-    "verify": "node verify-build.js",
-    "build-and-verify": "npm run build && npm run verify",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build-and-test": "npm run build && npm test",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "keywords": [],
   "author": "",
@@ -18,8 +19,12 @@
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
+    "@babel/plugin-syntax-import-meta": "^7.10.4",
     "@babel/preset-env": "^7.28.3",
+    "babel-jest": "^30.2.0",
     "babel-loader": "^10.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
     "webpack": "^5.101.3",
     "webpack-cli": "^6.0.1"
   }

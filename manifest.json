@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SaveGrandma - Email Security",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Protect yourself from phishing emails. Built with your privacy in mind.",
   "permissions": [
     "storage",
@@ -12,7 +12,7 @@
     "https://inbox.google.com/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "dist/popup.html",
     "default_title": "SaveGrandma - Email Protection",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -21,10 +21,13 @@
       "128": "icons/icon128.png"
     }
   },
+  "background": {
+    "service_worker": "dist/service-worker.bundle.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://mail.google.com/*", "https://inbox.google.com/*"],
-      "js": ["savegrandma.bundle.js"],
+      "js": ["dist/content-script.bundle.js"],
       "run_at": "document_end"
     }
   ],

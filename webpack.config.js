@@ -3,11 +3,13 @@ const path = require('path');
 module.exports = {
   mode: 'development',
   entry: {
-    savegrandma: './src/savegrandma.js'
+    'content-script': './src/contentScripts/gmail/index.js',
+    'popup': './src/frontend/popup/index.js',
+    'service-worker': './src/serviceWorker/index.js'
   },
   output: {
-    path: path.resolve(__dirname, '.'),
-    filename: 'savegrandma.bundle.js',
+    path: path.resolve(__dirname, 'dist'),
+    filename: '[name].bundle.js',
     clean: false,
     // Ensure deterministic builds
     hashFunction: 'sha256',
@@ -30,6 +32,9 @@ module.exports = {
                 },
                 modules: false
               }]
+            ],
+            plugins: [
+              '@babel/plugin-syntax-import-meta'
             ]
           }
         }

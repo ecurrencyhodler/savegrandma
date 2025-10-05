@@ -33,7 +33,7 @@ npm run verify
 4. Optionally, diff the files directly (e.g. `diff -u source/savegrandma.bundle.js store/savegrandma.bundle.js`).
 
 ## Current Build Information
-- **Version**: 1.1.0 (manifest.json)
+- **Version**: 2.0.0 (manifest.json)
 - **Build Date**: Generated on build
 - **Source Hash**: Generated from GitHub commit
 - **Master Hash**: Generated from all key files

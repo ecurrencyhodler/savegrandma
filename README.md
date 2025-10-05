@@ -24,6 +24,31 @@ npm install
 npm run build
 ```
 
+**Build Output**:
+The build process creates separate bundles for different parts of the extension:
+- `dist/content-script.bundle.js` - Gmail content script
+- `dist/popup.bundle.js` - Extension popup interface  
+- `dist/service-worker.bundle.js` - Background service worker
+- `dist/popup.html` & `dist/popup.css` - Popup assets
+
+**Available Build Commands**:
+```bash
+# Build the extension
+npm run build
+
+# Build and run tests
+npm run build-and-test
+
+# Run tests only
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
 ### 3. Load the Extension in Chrome
 
 1. Open Chrome and go to `chrome://extensions`
@@ -31,7 +56,62 @@ npm run build
 3. Click "Load unpacked extension"
 4. Select the SaveGrandma directory
 
-### 4. Test the Extension
+### 4. Project Structure
+
+The extension follows a modern modular architecture:
+
+```
+src/
+├── common/                    # Shared utilities and modules
+│   ├── chromeApi/            # Chrome extension API wrappers
+│   ├── domUtils/             # DOM manipulation utilities
+│   ├── stats/                # Statistics tracking system
+│   ├── storage/              # Data persistence layer
+│   └── whitelist/            # Email whitelist management
+├── contentScripts/           # Content script logic
+│   └── gmail/               # Gmail-specific content script
+├── frontend/                 # User interface components
+│   └── popup/               # Extension popup interface
+└── serviceWorker/           # Background service worker
+```
+
+**Key Components**:
+- **Content Scripts**: Inject into Gmail pages to analyze emails
+- **Popup Interface**: User-facing dashboard with statistics and controls
+- **Service Worker**: Background processing and messaging
+- **Common Modules**: Reusable utilities for DOM manipulation, storage, and statistics
+
+### 5. Testing Framework
+
+The project includes a comprehensive Jest testing suite with 70% coverage requirements:
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (re-runs on file changes)
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+**Test Structure**:
+- Tests are located in `__tests__` directories alongside the code they test
+- Chrome extension APIs are automatically mocked in the test environment
+- Coverage thresholds: 70% minimum for branches, functions, lines, and statements
+
+**Testing Chrome Extension APIs**:
+```javascript
+test('should use chrome storage', () => {
+  // Chrome APIs are already mocked
+  expect(global.chrome.storage.local.set).toBeDefined();
+});
+```
+
+See `TESTING.md` for detailed testing documentation.
+
+### 6. Test the Extension
 
 1. Open Gmail in a new tab
 2. Click the SaveGrandma extension icon in the Chrome toolbar to open the popup menu
@@ -48,7 +128,7 @@ npm run build
    - `SaveGrandma: Status changed to: initialized`
    - `SaveGrandma: Email analysis complete` (when emails are processed)
 
-### 5. Debug Information
+### 7. Debug Information
 
 The extension includes comprehensive debug tracking:
 
@@ -74,11 +154,17 @@ SaveGrandmaDebug.errors
 
 // Get full debug info
 SaveGrandmaDebug
+
+// Check save failure counts (new in v2.1)
+SaveGrandmaDebug.getSaveFailureCounts()
+
+// Reset save failure counts (new in v2.1)
+SaveGrandmaDebug.resetSaveFailureCounts()
 ```
 
 ## Current Status
 
-The extension is fully functional with DOM-based email analysis:
+The extension is fully functional with DOM-based email analysis (v2.0.0):
 - ✅ **Manifest V3 Compatible**: Updated to use Chrome's latest extension standard
 - ✅ **DOM-Based Integration**: Uses Gmail DOM manipulation for complete privacy
 - ✅ **Webpack Bundling**: Properly bundles extension code (no external dependencies)
@@ -91,3 +177,4 @@ The extension is fully functional with DOM-based email analysis:
 - ✅ **Whitelist Management**: Add/remove emails from whitelist with individual or bulk operations
 - ✅ **Phishing Detection Logic**: DOM-based threat analysis with visual indicators
 - ✅ **Grammar Analysis**: Uses Compromise.js for English grammar/spelling analysis
+- ✅ **Smart Save Failure Handling**: Automatically stops retrying saves after 3 failed attempts to prevent infinite loops
