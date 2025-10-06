@@ -1135,6 +1135,14 @@ async function processEmailRow(element) {
         // Analyze for phishing with visual indicators (new email - count in stats)
         const analysis = analyzeEmailForPhishing(emailData);
         addVisualIndicator(element, analysis.isPhishing, analysis, emailData, true); // true = isNewEmail
+        
+        // Store analysis data in the row object for later use
+        const rowIndex = SaveGrandmaDebug.emailRows.findIndex(
+          row => row.emailData.threadId === emailData.threadId
+        );
+        if (rowIndex !== -1) {
+          SaveGrandmaDebug.emailRows[rowIndex].analysis = analysis;
+        }
       } else {
         // Re-add icon from cache, but check whitelist first (cached email - don't count in stats)
         const cachedData = emailAnalysisCache.get(emailData.threadId);
@@ -1144,6 +1152,16 @@ async function processEmailRow(element) {
             addVisualIndicator(element, true, cachedData.analysis, cachedData.emailData, false); // false = isNewEmail
           }
           // If whitelisted, don't add the icon (it will be removed)
+        }
+        
+        // Store cached analysis data in the row object for later use
+        if (cachedData) {
+          const rowIndex = SaveGrandmaDebug.emailRows.findIndex(
+            row => row.emailData.threadId === emailData.threadId
+          );
+          if (rowIndex !== -1) {
+            SaveGrandmaDebug.emailRows[rowIndex].analysis = cachedData.analysis;
+          }
         }
       }
       
@@ -1325,7 +1343,7 @@ async function initializeDOMMonitoring() {
  */
 function reAddWarningIcons() {
   SaveGrandmaDebug.emailRows.forEach(row => {
-    if (row.element && row.element.isConnected) {
+    if (row.element && row.element.isConnected && row.analysis) {
       // Check if indicator still exists
       const existingIndicator = row.element.querySelector('.savegrandma-warning-icon, .savegrandma-safe-icon');
       if (!existingIndicator) {
