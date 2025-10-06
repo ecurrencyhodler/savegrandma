@@ -168,7 +168,7 @@ The extension is fully functional with DOM-based email analysis (v2.0.0):
 - ✅ **Manifest V3 Compatible**: Updated to use Chrome's latest extension standard
 - ✅ **DOM-Based Integration**: Uses Gmail DOM manipulation for complete privacy
 - ✅ **Webpack Bundling**: Properly bundles extension code (no external dependencies)
-- ✅ **Privacy-First**: No external requests or third-party dependencies
+- ✅ **Privacy-First**: Emails scanned and analyzed locally. No data leaves your browser
 - ✅ **Email Data Extraction**: Locally captures sender, subject, body, attachments, and metadata
 - ✅ **Smart Scan Completion**: Detects when email processing is finished
 - ✅ **Scan Reporting**: Generates comprehensive scan summaries

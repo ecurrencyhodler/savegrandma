@@ -24,3 +24,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 console.log('SaveGrandma service worker initialized');
 
+
+
+
+
